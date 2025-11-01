@@ -28,8 +28,8 @@ from .source import (
     game_free_cache_file,
     game_free_cache,
     )
-require("nonebot_plugin_htmlrender")
-from nonebot_plugin_htmlrender import html_to_pic  # noqa: E402
+# require("nonebot_plugin_htmlrender")
+# from nonebot_plugin_htmlrender import html_to_pic  # noqa: E402
 
 async def steam_link_rule() -> bool:
     if config_steam.steam_plugin_enabled and config_steam.steam_link_enabled:
@@ -75,16 +75,16 @@ async def generate_image(html_content: str, width: int = 500) -> bytes:
         content=html_content  # 插入HTML内容
     )
     
-    # 使用html_to_pic生成图片
-    return await html_to_pic(
-        html=html,
-        wait=1000,
-        type="jpeg",
-        quality=90,
-        device_scale_factor=2,
-        screenshot_timeout=30_000,
-        viewport={"width": width, "height": 100}  # 使用相同的宽度
-    )
+    # # 使用html_to_pic生成图片
+    # return await html_to_pic(
+    #     html=html,
+    #     wait=1000,
+    #     type="jpeg",
+    #     quality=90,
+    #     device_scale_factor=2,
+    #     screenshot_timeout=30_000,
+    #     viewport={"width": width, "height": 100}  # 使用相同的宽度
+    # )
 
 
 

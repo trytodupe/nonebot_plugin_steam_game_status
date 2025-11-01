@@ -528,7 +528,7 @@ async def steam_free_handle(target: MsgTarget, matcher: Matcher, action: Match[s
     if res:
         await matcher.finish(res)
         
-@scheduler.scheduled_job("cron", hour=config_steam.steam_subscribe_time.split(":")[0], minute=config_steam.steam_subscribe_time.split(":")[1])
+# @scheduler.scheduled_job("cron", hour=config_steam.steam_subscribe_time.split(":")[0], minute=config_steam.steam_subscribe_time.split(":")[1])
 async def steam_subscribe():
     logger.info("steam定时尝试获取推送喜加一")
     await get_free_games_info()
