@@ -115,7 +115,8 @@ if steam_list_tmp_first_val is not None and isinstance(steam_list_tmp_first_val,
         steam_list_dict[steam_id] = UserData(
             time=steam_list_tmp[steam_id][0],
             game_name=steam_list_tmp[steam_id][1],
-            nickname=steam_list_tmp[steam_id][2]
+            nickname=steam_list_tmp[steam_id][2],
+            game_id="",
             )
     new_file_steam.write_text(json.dumps(steam_list_dict))
     logger.success("steam 0.2.0 数据迁移成功")

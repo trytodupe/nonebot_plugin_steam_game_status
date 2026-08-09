@@ -25,6 +25,7 @@ from arclet.alconna import Alconna, Option, Args, CommandMeta, AllParam
 
 from .utils import http_client, get_target, driver, HTTPClientSession, to_enum
 from .model import UserData, GroupData3, SafeResponse
+from .status import GameTransition, classify_game_transition
 from .config import Config,__version__, config_steam, bot_name, get_steam_api_domain
 from .api import (
     gameid_to_name, 
@@ -177,7 +178,7 @@ async def _():
             except Exception as e:
                 logger.warning(f"Steam id: {steam_id} 修复失败，下次重启时重试。失败原因 : {e}")
                 continue
-            steam_list[steam_id] = UserData(time=0,game_name="",nickname=steam_name)
+            steam_list[steam_id] = UserData(time=0,game_name="",nickname=steam_name,game_id="")
             logger.debug(f"Steam id: {steam_id},name: {steam_name} 异常，修复成功")
 
 async def get_status(client: HTTPClientSession, steam_id_to_groups: Dict[str, List[str]], steam_list: Dict[str, UserData], steam_id: str):
@@ -193,13 +194,20 @@ async def get_status(client: HTTPClientSession, steam_id_to_groups: Dict[str, Li
             
             res_info = json.loads(res.text)["response"]["players"][0]
             
-            if "gameextrainfo" in res_info and steam_list[steam_id]["game_name"] == "":
+            current_game_id = str(res_info.get("gameid", "")) if "gameextrainfo" in res_info else ""
+            transition = classify_game_transition(
+                steam_list[steam_id]["game_name"],
+                steam_list[steam_id].get("game_id", ""),
+                current_game_id,
+            )
+
+            if transition == GameTransition.START:
                 # 如果发现开始玩了而之前未玩
                 timestamp = int(time.time()/60)
                 game_name = await gameid_to_name(res_info["gameid"],res_info["gameextrainfo"])
                 if game_name == "":
                     game_name = res_info["gameextrainfo"]
-                user_info = UserData(time=timestamp, game_name=game_name, nickname=res_info['personaname'])
+                user_info = UserData(time=timestamp, game_name=game_name, nickname=res_info['personaname'], game_id=current_game_id)
                 
                 for group_id in steam_id_to_groups[steam_id]:
                     if game_name in exclude_game[str(group_id)]:
@@ -212,33 +220,40 @@ async def get_status(client: HTTPClientSession, steam_id_to_groups: Dict[str, Li
                     else:
                         pass
 
-            elif "gameextrainfo" in res_info and steam_list[steam_id]["time"]!= -1 and steam_list[steam_id]["game_name"] != "":
+            elif transition == GameTransition.BACKFILL:
+                user_info = UserData(
+                    time=steam_list[steam_id]["time"],
+                    game_name=steam_list[steam_id]["game_name"],
+                    nickname=res_info['personaname'],
+                    game_id=current_game_id,
+                )
+                logger.debug(f"steam id:{steam_id} 补全正在玩的 game id:{current_game_id}")
+
+            elif transition == GameTransition.SWITCH and steam_list[steam_id]["time"]!= -1:
                 # 如果发现开始玩了而之前也在玩(bot一直在线)
                 game_name = await gameid_to_name(res_info["gameid"],res_info["gameextrainfo"])
                 if game_name == "":
                     game_name = res_info["gameextrainfo"]
-                if game_name != steam_list[steam_id]["game_name"]:
-                    # 如果发现玩的是新游戏
-                    game_name_old = steam_list[steam_id]["game_name"]
-                    timestamp = int(time.time()/60)
-                    user_info = UserData(time=timestamp, game_name=game_name, nickname=res_info['personaname'])
-                    for group_id in steam_id_to_groups[steam_id]:
-                        if game_name in exclude_game[str(group_id)] or game_name_old in exclude_game[str(group_id)]:
-                            logger.trace(f"群 {group_id} 因游戏名单跳过发送 steam id {steam_id},name {res_info['personaname']} 正在玩的新游戏 {game_name},旧游戏 {game_name_old}")
-                            continue
-                        target = await get_group_target_bot(group_id)
-                        if target:
-                            logger.trace(f"群 {group_id} 准备发送 steam id {steam_id},name {res_info['personaname']} 正在玩的新游戏 {game_name}。使用适配器{target.adapter}，Bot id {target.self_id}")
-                            await UniMessage(f"{res_info['personaname']} 又开始玩 {game_name}{config_steam.steam_tail_tone} 。").send(target=target)
-                        else:
-                            pass
+                game_name_old = steam_list[steam_id]["game_name"]
+                timestamp = int(time.time()/60)
+                user_info = UserData(time=timestamp, game_name=game_name, nickname=res_info['personaname'], game_id=current_game_id)
+                for group_id in steam_id_to_groups[steam_id]:
+                    if game_name in exclude_game[str(group_id)] or game_name_old in exclude_game[str(group_id)]:
+                        logger.trace(f"群 {group_id} 因游戏名单跳过发送 steam id {steam_id},name {res_info['personaname']} 正在玩的新游戏 {game_name},旧游戏 {game_name_old}")
+                        continue
+                    target = await get_group_target_bot(group_id)
+                    if target:
+                        logger.trace(f"群 {group_id} 准备发送 steam id {steam_id},name {res_info['personaname']} 正在玩的新游戏 {game_name}。使用适配器{target.adapter}，Bot id {target.self_id}")
+                        await UniMessage(f"{res_info['personaname']} 又开始玩 {game_name}{config_steam.steam_tail_tone} 。").send(target=target)
+                    else:
+                        pass
 
-            elif "gameextrainfo" not in res_info and steam_list[steam_id]["game_name"] != "":
+            elif transition == GameTransition.STOP:
                 # 之前有玩，现在没玩
                 timestamp = int(time.time()/60)
                 game_name_old = steam_list[steam_id]["game_name"]
                 game_time_old = steam_list[steam_id]["time"]
-                user_info = UserData(time=timestamp, game_name="", nickname=res_info['personaname'])
+                user_info = UserData(time=timestamp, game_name="", nickname=res_info['personaname'], game_id="")
                 game_time = timestamp - game_time_old 
                 # 判断是否是重启后的结束游戏
                 for group_id in steam_id_to_groups[steam_id]:
@@ -256,32 +271,28 @@ async def get_status(client: HTTPClientSession, steam_id_to_groups: Dict[str, Li
                     else:
                         pass
                     
-            elif  "gameextrainfo" in res_info and steam_list[steam_id]["time"]== -1 and steam_list[steam_id]["game_name"] != "":
+            elif transition == GameTransition.SWITCH and steam_list[steam_id]["time"]== -1:
                 # 之前有在玩 A，但bot重启了，现在在玩 B
                 game_name = await gameid_to_name(res_info["gameid"],res_info["gameextrainfo"])
                 if game_name == "":
                     game_name = res_info["gameextrainfo"]
                 game_name_old = steam_list[steam_id]["game_name"]
-                if game_name != game_name_old:
-                    # 还是原来的游戏，就不播了，所以这里只播变了的
-                    logger.trace(f"用户 {steam_id} 重启后开始玩新游戏 {game_name}，之前的游戏是 {game_name_old}，所以播报")
-                    timestamp = int(time.time()/60)
-                    user_info = UserData(time=timestamp, game_name=game_name, nickname=res_info['personaname'])
-                    for group_id in steam_id_to_groups[steam_id]:
-                        if game_name in exclude_game[str(group_id)] or game_name_old in exclude_game[str(group_id)]:
-                            logger.trace(f"群 {group_id} 因游戏名单跳过发送 steam id {steam_id},name {res_info['personaname']} 重启之后的游戏： {game_name},重启之前的游戏 {game_name_old}")
-                            continue
-                        target = await get_group_target_bot(group_id)
-                        if target:
-                            logger.trace(f"群 {group_id} 准备发送 steam id {steam_id},name {res_info['personaname']} 重启之后的游戏： {game_name}。使用适配器{target.adapter}，Bot id {target.self_id}")
-                            await UniMessage(f"{res_info['personaname']} 又开始玩 {game_name}{config_steam.steam_tail_tone} 。").send(target=target)
-                        else:
-                            pass
-                else:
-                    logger.trace(f"用户 {steam_id} 重启后还在玩 {game_name_old}，所以跳过播报")    
+                logger.trace(f"用户 {steam_id} 重启后开始玩新游戏 {game_name}，之前的游戏是 {game_name_old}，所以播报")
+                timestamp = int(time.time()/60)
+                user_info = UserData(time=timestamp, game_name=game_name, nickname=res_info['personaname'], game_id=current_game_id)
+                for group_id in steam_id_to_groups[steam_id]:
+                    if game_name in exclude_game[str(group_id)] or game_name_old in exclude_game[str(group_id)]:
+                        logger.trace(f"群 {group_id} 因游戏名单跳过发送 steam id {steam_id},name {res_info['personaname']} 重启之后的游戏： {game_name},重启之前的游戏 {game_name_old}")
+                        continue
+                    target = await get_group_target_bot(group_id)
+                    if target:
+                        logger.trace(f"群 {group_id} 准备发送 steam id {steam_id},name {res_info['personaname']} 重启之后的游戏： {game_name}。使用适配器{target.adapter}，Bot id {target.self_id}")
+                        await UniMessage(f"{res_info['personaname']} 又开始玩 {game_name}{config_steam.steam_tail_tone} 。").send(target=target)
+                    else:
+                        pass
                     
-            elif "gameextrainfo" not in res_info and steam_list[steam_id]["game_name"] == "":
-                # 一直没玩
+            elif transition == GameTransition.SAME:
+                # 游戏状态没有变化
                 pass
         else:
             logger.debug(f"steam id:{steam_id} 查询状态不是200，{res.status_code} \n{res.text}")
@@ -382,7 +393,7 @@ async def steam_bind_handle(target: MsgTarget,matcher: Matcher, id: Match[str]):
         except Exception as e:
             logger.debug(f"{steam_id} 绑定失败，{e}")
             await matcher.finish(f"{steam_id} 绑定失败{config_steam.steam_tail_tone}，{e}")
-        steam_list[steam_id] = UserData(time=0,game_name="",nickname=steam_name)
+        steam_list[steam_id] = UserData(time=0,game_name="",nickname=steam_name,game_id="")
         
     group_list[str(target.id)]["user_list"].append(steam_id)
     save_data()

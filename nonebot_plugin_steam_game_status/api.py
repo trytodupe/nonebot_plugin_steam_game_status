@@ -110,10 +110,9 @@ async def gameid_to_name(gameid: str,origin_name: Optional[str] = None) -> str:
         logger.debug(f"get game name no success.{res_json}")
         return ""
     name = res_json['data']['name']
-    if origin_name is None and origin_name != name:
-        gameid2name[gameid] = name
-        gameid2name[name] = gameid
-        game_cache_file.write_text(json.dumps(gameid2name))
+    gameid2name[gameid] = name
+    gameid2name[name] = gameid
+    game_cache_file.write_text(json.dumps(gameid2name))
     return name
 
 async def gameid_to_price(game_id: str,game_data: Dict,location: str = "CN") -> Dict[str, str]:

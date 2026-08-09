@@ -24,10 +24,13 @@ class GroupData3(GroupData2):
     xijiayi: bool
     
 
-class UserData(TypedDict):
+class UserDataBase(TypedDict):
     time: int
     game_name: str
     nickname: str
+
+class UserData(UserDataBase, total=False):
+    game_id: str
 
 class SafeResponse:
     def __init__(self, response: Response):
